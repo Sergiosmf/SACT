@@ -1,0 +1,10 @@
+# Ignorar todos os arquivos de feedback
+feedback_*.txt
+
+# Exceto o exemplo
+!feedback_exemplo.txt
+
+# Arquivos de backup
+*.tar.gz
+*.zip
+*.bak

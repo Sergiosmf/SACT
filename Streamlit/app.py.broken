@@ -1,0 +1,418 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Interface Streamlit para Sistema CT-e
+Camada de Visualização que integra com a Camada de Aplicação
+"""
+
+import streamlit as st
+import sys
+import os
+from pathlib import Path
+import time
+import io
+from contextlib import redirect_stdo        # Menu principal
+        menu_opcoes = [
+            "🔧 Processamento CT-e",
+            "📊 Operação de Transporte",
+            "💰 Rentabilidade e Custos",
+            "💬 Feedback"
+        ]irect_stderr
+
+# Configurar paths
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, parent_dir)
+
+# Importar camada de aplicação
+try:
+    from Database.main import CTEMainApplication
+    from Config.database_config import validate_config, DATABASE_CONFIG
+except ImportError as e:
+    st.error(f"❌ Erro de importação: {e}")
+    st.error(f"Diretório atual: {current_dir}")
+    st.error(f"Diretório pai: {parent_dir}")
+    st.error(f"Caminhos no sys.path: {sys.path[:5]}")
+    st.stop()
+
+
+class StreamlitCTEInterface:
+    """Interface Streamlit para o Sistema CT-e"""
+    
+    def __init__(self):
+        """Inicializa a interface Streamlit"""
+        self.app = CTEMainApplication()
+        
+    def setup_page(self):
+        """Configura a página principal do Streamlit"""
+        st.set_page_config(
+            page_title="Sistema CT-e",
+            page_icon="🚛",
+            layout="wide",
+            initial_sidebar_state="expanded"
+        )
+        
+        # Header principal
+        st.title("🚛 Sistema de Processamento CT-e")
+        st.markdown("**Alimentação Automática do Banco de Dados PostgreSQL**")
+        st.divider()
+        
+    def mostrar_status_configuracao(self):
+        """Mostra o status da configuração do sistema"""
+        st.subheader("📋 1. Status da Configuração")
+        
+        with st.container():
+            config_validation = validate_config()
+            
+            if config_validation['valid']:
+                st.success("✅ Configuração válida")
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.info(f"🏛️ **Banco:** {DATABASE_CONFIG['database']}")
+                with col2:
+                    st.info(f"🏠 **Host:** {DATABASE_CONFIG['host']}:{DATABASE_CONFIG['port']}")
+                with col3:
+                    st.info(f"👤 **Usuário:** {DATABASE_CONFIG['user']}")
+                
+                return True
+            else:
+                st.error("❌ Configuração inválida")
+                for erro in config_validation['errors']:
+                    st.error(f"• {erro}")
+                return False
+    
+    def selecionar_diretorio(self):
+        """Interface para seleção de diretório"""
+        st.subheader("📋 2. Seleção de Diretório")
+        
+        # Abordagem alternativa: mostrar instruções e usar drag&drop simulado
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            # Input para caminho do diretório
+            diretorio_path = st.text_input(
+                "Caminho do diretório com arquivos XML:",
+                placeholder="/caminho/para/arquivos/xml",
+                help="Digite o caminho completo para o diretório contendo os arquivos CT-e XML",
+                key="diretorio_input"
+            )
+        
+        with col2:
+            st.write("")  # Espaço para alinhar com o input
+            if st.button("� Dica", help="Como encontrar o caminho"):
+                st.info("""
+                **Como encontrar o caminho do diretório:**
+                
+                **No macOS:**
+                1. Abra o Finder
+                2. Navegue até a pasta desejada
+                3. Clique com botão direito → "Copiar caminho"
+                4. Cole aqui no campo acima
+                
+                **Exemplo:** `/Users/seu_usuario/Documents/CT-e/mes_10_2025`
+                """)
+        
+        # Alternativa: file uploader para arquivos únicos (como demonstração)
+        st.write("**Alternativa:** Para teste, você pode fazer upload de alguns arquivos XML:")
+        uploaded_files = st.file_uploader(
+            "Selecione arquivos XML de CT-e",
+            accept_multiple_files=True,
+            type=['xml'],
+            help="Selecione um ou mais arquivos XML para teste"
+        )
+        
+        # Processar diretório digitado
+        if diretorio_path:
+            diretorio = Path(diretorio_path)
+            
+            if diretorio.exists() and diretorio.is_dir():
+                # Usar FileManager para descobrir arquivos XML
+                xml_files = self.app.file_manager.descobrir_arquivos_xml(diretorio)
+                total_arquivos = len(xml_files)
+                
+                if total_arquivos > 0:
+                    st.success(f"✅ Diretório válido: {diretorio.name}")
+                    st.info(f"📊 Total de arquivos XML encontrados: {total_arquivos}")
+                    
+                    # Mostrar alguns exemplos de arquivos
+                    if total_arquivos > 0:
+                        st.write("**Exemplos de arquivos encontrados:**")
+                        for arquivo in xml_files[:5]:  # Mostrar apenas os primeiros 5
+                            st.write(f"• {arquivo.name}")
+                        
+                        if total_arquivos > 5:
+                            st.write(f"... e mais {total_arquivos - 5} arquivos")
+                    
+                    return diretorio, total_arquivos
+                else:
+                    st.warning("⚠️ Nenhum arquivo XML encontrado no diretório")
+                    return None, 0
+            else:
+                if diretorio_path:  # Só mostrar erro se o usuário digitou algo
+                    st.error("❌ Diretório não existe ou não é válido")
+                return None, 0
+        
+        # Processar arquivos enviados como alternativa
+        if uploaded_files:
+            st.success(f"✅ {len(uploaded_files)} arquivo(s) selecionado(s) para teste")
+            st.info("📝 **Nota:** Esta é uma funcionalidade de teste. Para processamento completo, use um diretório.")
+            
+            # Criar diretório temporário e salvar arquivos
+            import tempfile
+            temp_dir = Path(tempfile.mkdtemp())
+            
+            for uploaded_file in uploaded_files:
+                file_path = temp_dir / uploaded_file.name
+                with open(file_path, 'wb') as f:
+                    f.write(uploaded_file.getbuffer())
+            
+            return temp_dir, len(uploaded_files)
+        
+        return None, 0
+    
+    def configurar_parametros(self):
+        """Interface para configuração de parâmetros"""
+        st.subheader("📋 3. Configuração de Parâmetros")
+        
+        # Configuração do custo por quilômetro
+        custo_por_km = st.number_input(
+            "Custo por Quilômetro (R$):",
+            min_value=0.01,
+            value=2.50,
+            step=0.01,
+            format="%.2f",
+            help="Valor em reais por quilômetro para cálculos de rendimento"
+        )
+        
+        st.info(f"💰 Custo configurado: R$ {custo_por_km:.2f} por km")
+        
+        return custo_por_km
+    
+    def processar_arquivos_interface(self, diretorio: Path, custo_por_km: float):
+        """Interface para processamento de arquivos"""
+        st.subheader("📋 4. Processamento de Arquivos")
+        
+        # Botão para iniciar processamento
+        if st.button("🚀 Iniciar Processamento", type="primary", use_container_width=True):
+            return self.executar_processamento(diretorio, custo_por_km)
+        
+        return False
+    
+    def executar_processamento(self, diretorio: Path, custo_por_km: float):
+        """Executa o processamento dos arquivos com feedback em tempo real"""
+        
+        # Containers para feedback
+        status_container = st.container()
+        progress_container = st.container()
+        log_container = st.container()
+        
+        with status_container:
+            st.info("🔄 Iniciando processamento...")
+        
+        with progress_container:
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+        
+        with log_container:
+            log_placeholder = st.empty()
+        
+        try:
+            # Capturar saída do processamento
+            output_buffer = io.StringIO()
+            
+            # Inicializar sistema
+            with redirect_stdout(output_buffer), redirect_stderr(output_buffer):
+                inicializado = self.app.inicializar_sistema()
+            
+            logs = output_buffer.getvalue()
+            log_placeholder.text_area("📝 Logs do Sistema:", value=logs, height=200)
+            
+            if not inicializado:
+                status_container.error("❌ Falha na inicialização do sistema")
+                return False
+            
+            progress_bar.progress(20)
+            status_text.text("✅ Sistema inicializado - Processando arquivos...")
+            
+            # Processar arquivos
+            output_buffer = io.StringIO()
+            inicio_tempo = time.time()
+            
+            with redirect_stdout(output_buffer), redirect_stderr(output_buffer):
+                sucesso = self.app.processar_arquivos(diretorio, custo_por_km)
+            
+            logs_processamento = output_buffer.getvalue()
+            log_placeholder.text_area("📝 Logs do Sistema:", value=logs + "\n" + logs_processamento, height=300)
+            
+            tempo_total = time.time() - inicio_tempo
+            
+            progress_bar.progress(100)
+            
+            if sucesso:
+                status_container.success("🎉 Processamento concluído com sucesso!")
+                status_text.text(f"✅ Concluído em {tempo_total:.1f} segundos")
+                
+                # Mostrar resumo
+                st.subheader("📊 Resumo Final")
+                st.metric("⏱️ Tempo Total", f"{tempo_total:.1f}s")
+                
+                return True
+            else:
+                status_container.error("❌ Falha no processamento")
+                status_text.text("❌ Processo falhou - verifique os logs")
+                return False
+                
+        except Exception as e:
+            status_container.error(f"❌ Erro inesperado: {e}")
+            return False
+    
+    def mostrar_footer(self):
+        """Mostra rodapé da aplicação"""
+        st.divider()
+        st.markdown("---")
+        st.markdown(
+            """
+            <div style='text-align: center; color: #666;'>
+                🚛 Sistema de Processamento CT-e | 
+                Camada de Visualização Streamlit integrada à Camada de Aplicação
+            </div>
+            """, 
+            unsafe_allow_html=True
+        )
+    
+    def run(self):
+        """Executa a interface principal"""
+        # Setup da página
+        self.setup_page()
+        
+        # Menu principal
+        menu_opcoes = [
+            "🔧 Processamento CT-e",
+            "📊 Operação de Transporte",
+            "� Rentabilidade e Custos",
+            "�💬 Feedback"
+        ]
+        
+        menu_selecionado = st.selectbox(
+            "📋 Selecione uma funcionalidade:",
+            menu_opcoes,
+            index=0
+        )
+        
+        st.divider()
+        
+        # Executa a funcionalidade selecionada
+        if menu_selecionado == "🔧 Processamento CT-e":
+            self.pagina_processamento()
+        elif menu_selecionado == "📊 Operação de Transporte":
+            self.pagina_operacao_transporte()
+        elif menu_selecionado == "💰 Rentabilidade e Custos":
+            self.pagina_rentabilidade_custos()
+        else:  # Feedback
+            self.pagina_feedback()
+        
+        # Footer
+        self.mostrar_footer()
+    
+    def pagina_processamento(self):
+        """Página de processamento CT-e (funcionalidade original)"""
+        # 1. Status da configuração
+        config_valida = self.mostrar_status_configuracao()
+        
+        if not config_valida:
+            st.stop()
+        
+        st.divider()
+        
+        # 2. Seleção de diretório
+        diretorio, total_arquivos = self.selecionar_diretorio()
+        
+        if diretorio and total_arquivos > 0:
+            st.divider()
+            
+            # 3. Configuração de parâmetros
+            custo_por_km = self.configurar_parametros()
+            
+            st.divider()
+            
+            # 4. Processamento
+            self.processar_arquivos_interface(diretorio, custo_por_km)
+    
+    def pagina_operacao_transporte(self):
+        """Página de visualização de Operação de Transporte"""
+        try:
+            # Importar componente de operação de transporte
+            sys.path.append(os.path.join(current_dir, 'components'))
+            from components.operacao_transporte import exibir_operacao_transporte
+            
+            # Exibir visualizações
+            exibir_operacao_transporte()
+            
+        except ImportError as e:
+            st.error(f"❌ Erro ao carregar componente: {e}")
+            st.error("Verifique se o arquivo components/operacao_transporte.py existe")
+        except Exception as e:
+            st.error(f"❌ Erro ao exibir visualizações: {e}")
+            import traceback
+            st.code(traceback.format_exc())
+    
+    def pagina_rentabilidade_custos(self):
+        """Página de visualização de Rentabilidade e Custos"""
+        try:
+            # Importar componente de rentabilidade e custos
+            sys.path.append(os.path.join(current_dir, 'components'))
+            from components.rentabilidade_custos import exibir_rentabilidade_custos
+            
+            # Exibir visualizações
+            exibir_rentabilidade_custos()
+            
+        except ImportError as e:
+            st.error(f"❌ Erro ao carregar componente: {e}")
+            st.error("Verifique se o arquivo components/rentabilidade_custos.py existe")
+        except Exception as e:
+            st.error(f"❌ Erro ao exibir visualizações: {e}")
+            import traceback
+            st.code(traceback.format_exc())
+    
+    def pagina_feedback(self):
+        """Página de feedback do usuário"""
+        try:
+            # Importar componente de feedback
+            sys.path.append(os.path.join(current_dir, 'components'))
+            from components.feedback import create_feedback_form, display_feedback_stats
+            
+            # Criar formulário de feedback
+            manager = create_feedback_form()
+            
+            # Mostrar estatísticas
+            display_feedback_stats(manager)
+            
+            # Informações adicionais
+            st.divider()
+            st.info("""
+            💡 **Onde seus feedbacks são salvos?**
+            
+            Todos os feedbacks são salvos em arquivos `.txt` no diretório `Streamlit/feedback/`.
+            Cada feedback gera um arquivo único com timestamp para fácil rastreamento.
+            
+            Os arquivos podem ser facilmente acessados, lidos e organizados pela equipe de desenvolvimento.
+            """)
+            
+        except ImportError as e:
+            st.error(f"❌ Erro ao carregar componente de feedback: {e}")
+            st.error("Verifique se o arquivo components/feedback.py existe")
+        except Exception as e:
+            st.error(f"❌ Erro ao exibir feedback: {e}")
+            import traceback
+            st.code(traceback.format_exc())
+
+
+def main():
+    """Entry point da aplicação Streamlit"""
+    interface = StreamlitCTEInterface()
+    interface.run()
+
+
+if __name__ == "__main__":
+    main()

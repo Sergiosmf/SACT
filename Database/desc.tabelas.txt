@@ -1,0 +1,279 @@
+sact=# \dt
+                List of relations
+ Schema |      Name       | Type  |    Owner     
+--------+-----------------+-------+--------------
+ core   | endereco        | table | sergiomendes
+ core   | pessoa          | table | sergiomendes
+ core   | pessoa_endereco | table | sergiomendes
+ core   | veiculo         | table | sergiomendes
+ cte    | carga           | table | sergiomendes
+ cte    | documento       | table | sergiomendes
+ cte    | documento_parte | table | sergiomendes
+ ibge   | municipio       | table | sergiomendes
+ ibge   | uf              | table | sergiomendes
+(9 rows)
+
+sact=# \d core.endereco
+                                             Table "core.endereco"
+    Column    |           Type           | Collation | Nullable |                    Default                    
+--------------+--------------------------+-----------+----------+-----------------------------------------------
+ id_endereco  | bigint                   |           | not null | nextval('endereco_id_endereco_seq'::regclass)
+ logradouro   | text                     |           |          | 
+ numero       | text                     |           |          | 
+ complemento  | text                     |           |          | 
+ bairro       | text                     |           |          | 
+ cep          | text                     |           |          | 
+ id_municipio | integer                  |           |          | 
+ id_uf        | smallint                 |           |          | 
+ created_at   | timestamp with time zone |           | not null | now()
+ updated_at   | timestamp with time zone |           | not null | now()
+Indexes:
+    "endereco_pkey" PRIMARY KEY, btree (id_endereco)
+Foreign-key constraints:
+    "endereco_id_municipio_fkey" FOREIGN KEY (id_municipio) REFERENCES municipio(id_municipio) ON UPDATE CASCADE
+    "endereco_id_uf_fkey" FOREIGN KEY (id_uf) REFERENCES uf(id_uf) ON UPDATE CASCADE
+Referenced by:
+    TABLE "pessoa_endereco" CONSTRAINT "pessoa_endereco_id_endereco_fkey" FOREIGN KEY (id_endereco) REFERENCES endereco(id_endereco) ON DELETE CASCADE
+Triggers:
+    tgr_endereco_updated_at BEFORE UPDATE ON endereco FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at()
+
+
+sact=# \d core.pessoa;
+                                               Table "core.pessoa"
+       Column       |           Type           | Collation | Nullable |                  Default                  
+--------------------+--------------------------+-----------+----------+-------------------------------------------
+ id_pessoa          | bigint                   |           | not null | nextval('pessoa_id_pessoa_seq'::regclass)
+ nome               | text                     |           |          | 
+ cpf_cnpj           | text                     |           |          | 
+ inscricao_estadual | text                     |           |          | 
+ telefone           | text                     |           |          | 
+ email              | text                     |           |          | 
+ created_at         | timestamp with time zone |           | not null | now()
+ updated_at         | timestamp with time zone |           | not null | now()
+Indexes:
+    "pessoa_pkey" PRIMARY KEY, btree (id_pessoa)
+    "pessoa_cpf_cnpj_key" UNIQUE CONSTRAINT, btree (cpf_cnpj)
+Referenced by:
+    TABLE "documento_parte" CONSTRAINT "documento_parte_id_pessoa_fkey" FOREIGN KEY (id_pessoa) REFERENCES pessoa(id_pessoa)
+    TABLE "pessoa_endereco" CONSTRAINT "pessoa_endereco_id_pessoa_fkey" FOREIGN KEY (id_pessoa) REFERENCES pessoa(id_pessoa) ON DELETE CASCADE
+Triggers:
+    tgr_pessoa_updated_at BEFORE UPDATE ON pessoa FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at()
+
+
+sact=# \d pessoa_endereco
+                  Table "core.pessoa_endereco"
+   Column    |  Type  | Collation | Nullable |      Default      
+-------------+--------+-----------+----------+-------------------
+ id_pessoa   | bigint |           | not null | 
+ id_endereco | bigint |           | not null | 
+ tipo        | text   |           | not null | 'principal'::text
+Indexes:
+    "pessoa_endereco_pkey" PRIMARY KEY, btree (id_pessoa, id_endereco)
+Foreign-key constraints:
+    "pessoa_endereco_id_endereco_fkey" FOREIGN KEY (id_endereco) REFERENCES endereco(id_endereco) ON DELETE CASCADE
+    "pessoa_endereco_id_pessoa_fkey" FOREIGN KEY (id_pessoa) REFERENCES pessoa(id_pessoa) ON DELETE CASCADE
+
+sact=# \d core.veiculo
+                                                Table "core.veiculo"
+       Column        |           Type           | Collation | Nullable |                   Default                   
+---------------------+--------------------------+-----------+----------+---------------------------------------------
+ id_veiculo          | bigint                   |           | not null | nextval('veiculo_id_veiculo_seq'::regclass)
+ placa               | text                     |           |          | 
+ renavam             | text                     |           |          | 
+ proprietario        | text                     |           |          | 
+ id_uf_licenciamento | smallint                 |           |          | 
+ created_at          | timestamp with time zone |           | not null | now()
+ updated_at          | timestamp with time zone |           | not null | now()
+ posse               | veiculo_posse            |           | not null | 'DESCONHECIDO'::veiculo_posse
+ observacoes         | text                     |           |          | 
+ ano_modelo          | text                     |           |          | 
+ ano_fabricacao      | text                     |           |          | 
+ marca               | text                     |           |          | 
+ modelo              | text                     |           |          | 
+ chassi              | text                     |           |          | 
+ cor                 | text                     |           |          | 
+Indexes:
+    "veiculo_pkey" PRIMARY KEY, btree (id_veiculo)
+    "uq_veiculo_placa_norm" UNIQUE, btree (regexp_replace(upper(placa), '[^A-Z0-9]'::text, ''::text, 'g'::text))
+    "veiculo_chassi_key" UNIQUE CONSTRAINT, btree (chassi)
+    "veiculo_placa_key" UNIQUE CONSTRAINT, btree (placa)
+Check constraints:
+    "ck_veiculo_ano_fabricacao" CHECK (ano_fabricacao IS NULL OR ano_fabricacao ~ '^[0-9]{4}$'::text)
+    "ck_veiculo_ano_modelo" CHECK (ano_modelo IS NULL OR ano_modelo ~ '^[0-9]{4}$'::text)
+    "ck_veiculo_chassi_len" CHECK (chassi IS NULL OR chassi ~ '^[A-HJ-NPR-Z0-9]{17}$'::text)
+    "ck_veiculo_placa_format" CHECK (regexp_replace(upper(placa), '[^A-Z0-9]'::text, ''::text, 'g'::text) ~ '^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$'::text)
+    "ck_veiculo_renavam_digits" CHECK (renavam IS NULL OR renavam ~ '^[0-9]{9,11}$'::text)
+Foreign-key constraints:
+    "veiculo_id_uf_licenciamento_fkey" FOREIGN KEY (id_uf_licenciamento) REFERENCES uf(id_uf)
+Referenced by:
+    TABLE "documento" CONSTRAINT "documento_id_veiculo_fkey" FOREIGN KEY (id_veiculo) REFERENCES veiculo(id_veiculo)
+Triggers:
+    tgr_veiculo_updated_at BEFORE UPDATE ON veiculo FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at()
+
+sact=# \d cte.carga
+                           Table "cte.carga"
+        Column        |     Type      | Collation | Nullable | Default 
+----------------------+---------------+-----------+----------+---------
+ id_cte               | bigint        |           | not null | 
+ valor                | numeric(18,2) |           |          | 
+ peso                 | numeric(18,3) |           |          | 
+ quantidade           | numeric(18,3) |           |          | 
+ produto_predominante | text          |           |          | 
+ unidade_medida       | text          |           |          | 
+Indexes:
+    "carga_pkey" PRIMARY KEY, btree (id_cte)
+Foreign-key constraints:
+    "carga_id_cte_fkey" FOREIGN KEY (id_cte) REFERENCES documento(id_cte) ON DELETE CASCADE
+
+
+s                                               Table "cte.documento"
+        Column        |           Type           | Collation | Nullable |                  Default                  
+----------------------+--------------------------+-----------+----------+-------------------------------------------
+ id_cte               | bigint                   |           | not null | nextval('documento_id_cte_seq'::regclass)
+ chave                | text                     |           |          | 
+ numero               | text                     |           |          | 
+ serie                | text                     |           |          | 
+ data_emissao         | timestamp with time zone |           |          | 
+ cfop                 | text                     |           |          | 
+ valor_frete          | numeric(18,2)            |           |          | 
+ versao_schema        | text                     |           |          | 
+ id_municipio_origem  | integer                  |           |          | 
+ id_municipio_destino | integer                  |           |          | 
+ id_veiculo           | bigint                   |           |          | 
+ created_at           | timestamp with time zone |           | not null | now()
+ updated_at           | timestamp with time zone |           | not null | now()
+ quilometragem        | integer                  |           | not null | 
+Indexes:
+    "documento_pkey" PRIMARY KEY, btree (id_cte)
+    "documento_chave_key" UNIQUE CONSTRAINT, btree (chave)
+    "idx_cte_documento_cfop" btree (cfop)
+    "idx_cte_documento_data_emissao" btree (data_emissao)
+    "idx_cte_documento_destino" btree (id_municipio_destino)
+    "idx_cte_documento_origem" btree (id_municipio_origem)
+Foreign-key constraints:
+    "documento_id_municipio_destino_fkey" FOREIGN KEY (id_municipio_destino) REFERENCES municipio(id_municipio)
+    "documento_id_municipio_origem_fkey" FOREIGN KEY (id_municipio_origem) REFERENCES municipio(id_municipio)
+    "documento_id_veiculo_fkey" FOREIGN KEY (id_veiculo) REFERENCES veiculo(id_veiculo)
+Referenced by:
+    TABLE "carga" CONSTRAINT "carga_id_cte_fkey" FOREIGN KEY (id_cte) REFERENCES documento(id_cte) ON DELETE CASCADE
+    TABLE "documento_parte" CONSTRAINT "documento_parte_id_cte_fkey" FOREIGN KEY (id_cte) REFERENCES documento(id_cte) ON DELETE CASCADE
+Triggers:
+    tgr_cte_documento_updated_at BEFORE UPDATE ON documento FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at()
+
+
+sact=# \d cte.documento_parte
+             Table "cte.documento_parte"
+  Column   |  Type  | Collation | Nullable | Default 
+-----------+--------+-----------+----------+---------
+ id_cte    | bigint |           | not null | 
+ tipo      | text   |           | not null | 
+ id_pessoa | bigint |           | not null | 
+Indexes:
+    "documento_parte_pkey" PRIMARY KEY, btree (id_cte, tipo)
+    "idx_cte_parte_pessoa" btree (id_pessoa)
+Check constraints:
+    "documento_parte_tipo_check" CHECK (tipo = ANY (ARRAY['remetente'::text, 'destinatario'::text, 'expedidor'::text, 'recebedor'::text]))
+Foreign-key constraints:
+    "documento_parte_id_cte_fkey" FOREIGN KEY (id_cte) REFERENCES documento(id_cte) ON DELETE CASCADE
+    "documento_parte_id_pessoa_fkey" FOREIGN KEY (id_pessoa) REFERENCES pessoa(id_pessoa)
+
+
+sact=# \d municipio
+                            Table "ibge.municipio"
+      Column      |           Type           | Collation | Nullable | Default 
+------------------+--------------------------+-----------+----------+---------
+ id_municipio     | integer                  |           | not null | 
+ nome             | text                     |           | not null | 
+ id_uf            | smallint                 |           | not null | 
+ nome_normalizado | text                     |           |          | 
+ latitude         | numeric(9,6)             |           |          | 
+ longitude        | numeric(9,6)             |           |          | 
+ created_at       | timestamp with time zone |           | not null | now()
+ updated_at       | timestamp with time zone |           | not null | now()
+Indexes:
+    "municipio_pkey" PRIMARY KEY, btree (id_municipio)
+    "idx_municipio_nome_norm" btree (nome_normalizado)
+    "municipio_nome_id_uf_key" UNIQUE CONSTRAINT, btree (nome, id_uf)
+Foreign-key constraints:
+    "municipio_id_uf_fkey" FOREIGN KEY (id_uf) REFERENCES uf(id_uf) ON UPDATE CASCADE
+Referenced by:
+    TABLE "documento" CONSTRAINT "documento_id_municipio_destino_fkey" FOREIGN KEY (id_municipio_destino) REFERENCES municipio(id_municipio)
+    TABLE "documento" CONSTRAINT "documento_id_municipio_origem_fkey" FOREIGN KEY (id_municipio_origem) REFERENCES municipio(id_municipio)
+    TABLE "endereco" CONSTRAINT "endereco_id_municipio_fkey" FOREIGN KEY (id_municipio) REFERENCES municipio(id_municipio) ON UPDATE CASCADE
+Triggers:
+    tgr_municipio_updated_at BEFORE UPDATE ON municipio FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at()
+
+
+sact=# \d uf
+                            Table "ibge.uf"
+   Column   |           Type           | Collation | Nullable | Default 
+------------+--------------------------+-----------+----------+---------
+ id_uf      | smallint                 |           | not null | 
+ sigla      | character(2)             |           | not null | 
+ nome       | text                     |           | not null | 
+ regiao     | text                     |           |          | 
+ created_at | timestamp with time zone |           | not null | now()
+ updated_at | timestamp with time zone |           | not null | now()
+Indexes:
+    "uf_pkey" PRIMARY KEY, btree (id_uf)
+    "uf_sigla_key" UNIQUE CONSTRAINT, btree (sigla)
+Referenced by:
+    TABLE "endereco" CONSTRAINT "endereco_id_uf_fkey" FOREIGN KEY (id_uf) REFERENCES uf(id_uf) ON UPDATE CASCADE
+    TABLE "municipio" CONSTRAINT "municipio_id_uf_fkey" FOREIGN KEY (id_uf) REFERENCES uf(id_uf) ON UPDATE CASCADE
+    TABLE "veiculo" CONSTRAINT "veiculo_id_uf_licenciamento_fkey" FOREIGN KEY (id_uf_licenciamento) REFERENCES uf(id_uf)
+Triggers:
+    tgr_uf_updated_at BEFORE UPDATE ON uf FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at()
+
+
+
+
+SELECT * FROM core.veiculo;
+ id_veiculo |  placa  |   renavam   |          proprietario           | id_uf_licenciamento |          created_at           |          updated_at           |  posse   |   observacoes   | ano_modelo | ano_fabricacao |     marca     |     modelo     |      chassi       |   cor    
+------------+---------+-------------+---------------------------------+---------------------+-------------------------------+-------------------------------+----------+-----------------+------------+----------------+---------------+----------------+-------------------+----------
+          1 | NQO6C99 | 00169770591 | J M TRANSPORTE DE CARGAS EIRELI |                  22 | 2025-10-02 09:21:27.680041-03 | 2025-10-02 09:21:27.680041-03 | EM_POSSE | SEM OBSERVAÇÕES | 2009       | 2009           | MERCEDES BENZ | L1620          | 9BM6953049B670447 | AZUL
+          2 | NXN2A12 | 00452438179 | J M TRANSPORTE DE CARGAS EIRELI |                  21 | 2025-10-02 11:27:05.548972-03 | 2025-10-02 11:27:05.548972-03 | EM_POSSE | SEM OBSERVAÇÕES | 2012       | 2011           | MERCEDES BENZ | L1620          | 9BM695304CB813644 | BRANCO
+          3 | NHL6G38 | 00963910051 | J M TRANSPORTE DE CARGAS EIRELI |                  22 | 2025-10-02 11:27:05.554315-03 | 2025-10-02 11:27:05.554315-03 | EM_POSSE | SEM OBSERVAÇÕES | 2008       | 2008           | MERCEDES BENZ | L1620          | 9BM6953048B587039 | AZUL
+          4 | NWZ9I48 | 00328388831 | J M TRANSPORTE DE CARGAS EIRELI |                  22 | 2025-10-02 11:27:05.5559-03   | 2025-10-02 11:27:05.5559-03   | EM_POSSE | SEM OBSERVAÇÕES | 2011       | 2011           | MERCEDES BENZ | L1620          | 9BM695304BB787408 | VERMELHO
+          5 | NXO1J77 | 00465113028 | J M TRANSPORTE DE CARGAS EIRELI |                  22 | 2025-10-02 11:27:05.556945-03 | 2025-10-02 11:27:05.556945-03 | EM_POSSE | SEM OBSERVAÇÕES | 2012       | 2011           | MERCEDES BENZ | L1620          | 9BM695304CB825218 | AZUL
+          6 | NIR5H97 | 00281024383 | J M TRANSPORTE DE CARGAS EIRELI |                  22 | 2025-10-02 11:27:05.55811-03  | 2025-10-02 11:27:05.55811-03  | EM_POSSE | SEM OBSERVAÇÕES | 2011       | 2010           | VOLKSWAGEN    | 24.250 CNC 6X2 | 9534N8241BR121244 | BRANCO
+          8 | NHY4B31 | 00120516624 | J M TRANSPORTE DE CARGAS EIRELI |                  22 | 2025-10-02 11:28:29.225956-03 | 2025-10-02 11:28:29.225956-03 | EM_POSSE | SEM OBSERVAÇÕES | 2009       | 2008           | FORD          | CARGO 2422 E   | 9BFYCEHV19BB28670 | VERMELHO
+(7 rows)
+
+
+sact=# ALTER TABLE CTE.DOCUMENTO
+sact-# ADD COLUMN quilometragem INT NOT NULL;
+
+sact=# \d cte.documento;
+                                               Table "cte.documento"
+        Column        |           Type           | Collation | Nullable |                  Default                  
+----------------------+--------------------------+-----------+----------+-------------------------------------------
+ id_cte               | bigint                   |           | not null | nextval('documento_id_cte_seq'::regclass)
+ chave                | text                     |           |          | 
+ numero               | text                     |           |          | 
+ serie                | text                     |           |          | 
+ data_emissao         | timestamp with time zone |           |          | 
+ cfop                 | text                     |           |          | 
+ valor_frete          | numeric(18,2)            |           |          | 
+ versao_schema        | text                     |           |          | 
+ id_municipio_origem  | integer                  |           |          | 
+ id_municipio_destino | integer                  |           |          | 
+ id_veiculo           | bigint                   |           |          | 
+ created_at           | timestamp with time zone |           | not null | now()
+ updated_at           | timestamp with time zone |           | not null | now()
+ quilometragem        | integer                  |           | not null | 
+Indexes:
+    "documento_pkey" PRIMARY KEY, btree (id_cte)
+    "documento_chave_key" UNIQUE CONSTRAINT, btree (chave)
+    "idx_cte_documento_cfop" btree (cfop)
+    "idx_cte_documento_data_emissao" btree (data_emissao)
+    "idx_cte_documento_destino" btree (id_municipio_destino)
+    "idx_cte_documento_origem" btree (id_municipio_origem)
+Foreign-key constraints:
+    "documento_id_municipio_destino_fkey" FOREIGN KEY (id_municipio_destino) REFERENCES municipio(id_municipio)
+    "documento_id_municipio_origem_fkey" FOREIGN KEY (id_municipio_origem) REFERENCES municipio(id_municipio)
+    "documento_id_veiculo_fkey" FOREIGN KEY (id_veiculo) REFERENCES veiculo(id_veiculo)
+Referenced by:
+    TABLE "carga" CONSTRAINT "carga_id_cte_fkey" FOREIGN KEY (id_cte) REFERENCES documento(id_cte) ON DELETE CASCADE
+    TABLE "documento_parte" CONSTRAINT "documento_parte_id_cte_fkey" FOREIGN KEY (id_cte) REFERENCES documento(id_cte) ON DELETE CASCADE
+Triggers:
+    tgr_cte_documento_updated_at BEFORE UPDATE ON documento FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at()

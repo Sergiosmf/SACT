@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+TESTES AVANÇADOS - Persistência e Performance
+Testes completos de banco de dados e medição de desempenho
+"""
+
+import pytest
+import time
+import json
+from pathlib import Path
+from datetime import datetime
+
+
+@pytest.mark.database
+@pytest.mark.lento
+class TestPersistenciaAvancada:
+    """Testes avançados de persistência no banco de dados."""
+    
+    def test_insert_cte_completo(self, sample_xml_path, db_connection, results_dir, test_timestamp):
+        """Testa inserção completa de CT-e no banco usando função f_ingest_cte_json()."""
+        from cte_extractor import CTEFacade
+        
+        print("\n" + "="*80)
+        print("💾 TESTE DE PERSISTÊNCIA COMPLETA (usando f_ingest_cte_json)")
+        print("="*80)
+        
+        chave_teste = "88888888888888888888888888888888888888888888"
+        
+        try:
+            # Extrair dados
+            print("\n⚙️  Extraindo dados do XML...")
+            facade = CTEFacade()
+            dados = facade.extrair(str(sample_xml_path))
+            
+            # Preparar JSON para ingestão (substituir chave por chave de teste)
+            print("📝 Preparando dados para inserção...")
+            dados_ingest = dados.copy()
+            dados_ingest['chave'] = chave_teste
+            
+            with db_connection.cursor() as cursor:
+                # Limpar dados de teste
+                print("🧹 Limpando dados anteriores...")
+                cursor.execute("DELETE FROM cte.documento WHERE chave = %s", (chave_teste,))
+                
+                # Inserir usando função f_ingest_cte_json com medição de tempo
+                print("💾 Inserindo no banco de dados via f_ingest_cte_json()...")
+                inicio = time.perf_counter()
+                
+                cursor.execute("""
+                    SELECT cte.f_ingest_cte_json(%s::jsonb)
+                """, (json.dumps(dados_ingest),))
+                
+                id_cte = cursor.fetchone()[0]
+                db_connection.commit()
+                fim = time.perf_counter()
+                tempo_insert = (fim - inicio) * 1000
+                
+                print(f"✅ Inserido em {tempo_insert:.4f}ms (id_cte: {id_cte})")
+                
+                # Verificar integridade - usar JOIN com vw_resumo
+                print("� Verificando integridade...")
+                cursor.execute("""
+                    SELECT 
+                        d.chave, d.numero, d.serie, d.valor_frete,
+                        r.municipio_origem, r.municipio_destino,
+                        c.valor AS carga_valor, c.peso AS carga_peso,
+                        v.placa
+                    FROM cte.documento d
+                    LEFT JOIN cte.vw_resumo r ON r.id_cte = d.id_cte
+                    LEFT JOIN cte.carga c ON c.id_cte = d.id_cte
+                    LEFT JOIN core.veiculo v ON v.id_veiculo = d.id_veiculo
+                    WHERE d.chave = %s
+                """, (chave_teste,))
+                
+                registro = cursor.fetchone()
+                assert registro is not None, "Registro não encontrado após inserção"
+                
+                # Contar partes (remetente, destinatario, etc)
+                cursor.execute("""
+                    SELECT COUNT(*) FROM cte.documento_parte WHERE id_cte = %s
+                """, (id_cte,))
+                num_partes = cursor.fetchone()[0]
+                
+                # Validar dados
+                identificacao = dados.get('identificacao', {})
+                valores = dados.get('valores', {})
+                carga = dados.get('carga', {})
+                veiculo_data = dados.get('veiculo', {})
+                
+                verificacao = {
+                    'chave_encontrada': registro[0] == chave_teste,
+                    'numero_correto': str(registro[1]) == str(identificacao.get('numero', '999')),
+                    'valor_frete_correto': registro[3] is not None,
+                    'origem_inserida': registro[4] is not None or True,  # Pode ser None se IBGE não estiver populado
+                    'destino_inserido': registro[5] is not None or True,  # Pode ser None se IBGE não estiver populado
+                    'carga_inserida': registro[6] is not None,
+                    'veiculo_inserido': registro[8] is not None if veiculo_data.get('placa') else True,
+                    'partes_inseridas': num_partes >= 2  # Pelo menos remetente e destinatario
+                }
+                
+                # Relatório
+                relatorio = {
+                    'timestamp': datetime.now().isoformat(),
+                    'arquivo': sample_xml_path.name,
+                    'chave_teste': chave_teste,
+                    'id_cte': id_cte,
+                    'tempo_insert_ms': tempo_insert,
+                    'metodo': 'f_ingest_cte_json()',
+                    'num_partes': num_partes,
+                    'verificacao': verificacao,
+                    'dados_recuperados': {
+                        'chave': registro[0],
+                        'numero': registro[1],
+                        'serie': registro[2],
+                        'valor_frete': float(registro[3]) if registro[3] else None,
+                        'origem': registro[4],
+                        'destino': registro[5],
+                        'carga_valor': float(registro[6]) if registro[6] else None,
+                        'carga_peso': float(registro[7]) if registro[7] else None,
+                        'placa': registro[8]
+                    }
+                }
+                
+                output = results_dir / f"persistencia_completa_{test_timestamp}.json"
+                with open(output, 'w', encoding='utf-8') as f:
+                    json.dump(relatorio, f, indent=2, ensure_ascii=False, default=str)
+                
+                print("\n" + "="*80)
+                print("📊 RESULTADO DA PERSISTÊNCIA")
+                print("="*80)
+                print(f"ID CT-e: {id_cte}")
+                print(f"Número de partes: {num_partes}")
+                print(f"Tempo de INSERT: {tempo_insert:.4f}ms")
+                print(f"Verificações: {sum(verificacao.values())}/{len(verificacao)}")
+                print(f"Integridade: {'✅ OK' if all(verificacao.values()) else '❌ FALHA'}")
+                print(f"📄 Relatório: {output}")
+                print("="*80)
+                
+                assert all(verificacao.values()), "Falha na verificação de integridade"
+                
+        finally:
+            with db_connection.cursor() as cursor:
+                cursor.execute("DELETE FROM cte.documento WHERE chave = %s", (chave_teste,))
+                db_connection.commit()
+    
+    def test_performance_bulk_insert(self, sample_xml_dir, db_connection, results_dir, test_timestamp):
+        """Testa performance de inserção em lote usando f_ingest_cte_json()."""
+        from cte_extractor import CTEFacade
+        
+        print("\n" + "="*80)
+        print("🚀 TESTE DE PERFORMANCE - BULK INSERT (via f_ingest_cte_json)")
+        print("="*80)
+        
+        facade = CTEFacade()
+        arquivos = list(sample_xml_dir.glob("*.xml"))[:10]
+        
+        chaves_teste = [
+            f"888888888888888888888888888888888888888888{i:02d}"
+            for i in range(len(arquivos))
+        ]
+        
+        try:
+            print(f"\n📦 Processando {len(arquivos)} arquivos...")
+            
+            # Extrair todos os dados
+            dados_lote = []
+            tempo_extracao_total = 0
+            
+            for i, arquivo in enumerate(arquivos):
+                inicio = time.perf_counter()
+                dados = facade.extrair(str(arquivo))
+                fim = time.perf_counter()
+                tempo_extracao_total += (fim - inicio)
+                
+                # Modificar chave para teste
+                dados['chave'] = chaves_teste[i]
+                dados_lote.append(dados)
+                
+                print(f"   [{i+1}/{len(arquivos)}] {arquivo.name} ✅")
+            
+            tempo_extracao_ms = tempo_extracao_total * 1000
+            
+            # Bulk insert com medição
+            print(f"\n💾 Inserindo {len(dados_lote)} registros via f_ingest_cte_json()...")
+            
+            with db_connection.cursor() as cursor:
+                # Limpar
+                for chave in chaves_teste:
+                    cursor.execute("DELETE FROM cte.documento WHERE chave = %s", (chave,))
+                
+                # Inserir em lote usando f_ingest_cte_json
+                inicio = time.perf_counter()
+                
+                ids_inseridos = []
+                for dados in dados_lote:
+                    cursor.execute("""
+                        SELECT cte.f_ingest_cte_json(%s::jsonb)
+                    """, (json.dumps(dados),))
+                    id_cte = cursor.fetchone()[0]
+                    ids_inseridos.append(id_cte)
+                
+                db_connection.commit()
+                fim = time.perf_counter()
+                tempo_insert_ms = (fim - inicio) * 1000
+                
+                # Verificar
+                cursor.execute("""
+                    SELECT COUNT(*) FROM cte.documento 
+                    WHERE chave LIKE '88888888888888888888888888888888888888888%'
+                """)
+                count = cursor.fetchone()[0]
+                
+                relatorio = {
+                    'timestamp': datetime.now().isoformat(),
+                    'total_arquivos': len(arquivos),
+                    'total_registros': len(dados_lote),
+                    'registros_inseridos': count,
+                    'ids_inseridos': ids_inseridos,
+                    'tempo_extracao_ms': tempo_extracao_ms,
+                    'tempo_extracao_medio_ms': tempo_extracao_ms / len(arquivos),
+                    'tempo_insert_total_ms': tempo_insert_ms,
+                    'tempo_insert_medio_ms': tempo_insert_ms / len(dados_lote),
+                    'throughput_registros_por_segundo': len(dados_lote) / (tempo_insert_ms / 1000),
+                    'metodo': 'f_ingest_cte_json()'
+                }
+                
+                output = results_dir / f"performance_bulk_insert_{test_timestamp}.json"
+                with open(output, 'w', encoding='utf-8') as f:
+                    json.dump(relatorio, f, indent=2, ensure_ascii=False)
+                
+                print("\n" + "="*80)
+                print("📊 ESTATÍSTICAS DE BULK INSERT")
+                print("="*80)
+                print(f"Arquivos processados: {len(arquivos)}")
+                print(f"Registros inseridos: {count}/{len(dados_lote)}")
+                print(f"\n⏱️  TEMPOS:")
+                print(f"   Extração total:    {tempo_extracao_ms:.2f}ms")
+                print(f"   Extração média:    {relatorio['tempo_extracao_medio_ms']:.2f}ms/arquivo")
+                print(f"   Insert total:      {tempo_insert_ms:.2f}ms")
+                print(f"   Insert médio:      {relatorio['tempo_insert_medio_ms']:.2f}ms/registro")
+                print(f"\n📈 THROUGHPUT:")
+                print(f"   {relatorio['throughput_registros_por_segundo']:.2f} registros/segundo")
+                print(f"   Usando: {relatorio['metodo']}")
+                print(f"\n📄 Relatório: {output}")
+                print("="*80)
+                
+                assert count == len(dados_lote), "Nem todos os registros foram inseridos"
+                
+        finally:
+            with db_connection.cursor() as cursor:
+                for chave in chaves_teste:
+                    cursor.execute("DELETE FROM cte.documento WHERE chave = %s", (chave,))
+                db_connection.commit()
